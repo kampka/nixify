@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+
+set -e
+set -u
+set -o pipefail
+
+NIXIFY_DEBUG="${NIXIFY_DEBUG:-flase}"
+[ "$NIXIFY_DEBUG" = "true" ] && set -x
+
+NIXIFY_ENV_NAME="${NIXIFY_ENV_NAME:-}"
+SKIP_EDITOR="${SKIP_EDITOR:-false}"
+OVERRIDE_FILES="${OVERRIDE_FILES:-false}"
+
+NIXIFY_CONFIGURE_AUTOENV="${NIXIFY_CONFIGURE_AUTOENV:-true}"
+NIXIFY_AUTOENV_ENTER="${NIXIFY_AUTOENV_ENTER:-.env}"
+NIXIFY_AUTOENV_LEAVE="${NIXIFY_AUTOENV_LEAVE:-.out}"
+
+WORKING_DIR="${WORKING_DIR:-$(pwd)}"
+CURRENT_DIR="$(pwd)"
+
+usage() {
+    echo "nixify <options> [name]"
+    echo "Bootstrap a nix-shell environment for development"
+    echo ""
+    echo "  -p --path            : Path of the directory to nixify (default: pwd)"
+    echo "  -y --yes             : Always assume 'yes' when asking questions (WARNING: will override existing files)"
+    echo "  --no-editor          : Do not launch the EDITOR for shell.nix after completion"
+    echo "  --no-autoenv         : Do not configure any autoenv environemt"
+    echo "  -h --help            : Print this message and exit"
+    echo ""
+}
+
+error_exit() {
+    echo "$@" 1>&2
+    exit 1
+}
+
+ask_file_override() {
+    local filename="${1:-}"
+
+    ([ -e "${filename}" ] && [ "${OVERRIDE_FILES}" = "false" ]) || return 0
+    read -p "File ${filename} already exists. Override? " -n 1 -r
+    echo    # (optional) move to a new line
+    [[ $REPLY =~ ^[Yy]$ ]] && return 0
+    return 1
+}
+
+generate_nix_shell_file() {
+    local shell_environment="${1:-}"
+    [ -n "$shell_environment" ] || error_exit "No nix shell environemt passed"
+
+    if ask_file_override "${WORKING_DIR}/shell.nix"; then
+
+    cat > "${WORKING_DIR}/shell.nix" <<EOF
+with import <nixpkgs> {};
+stdenv.mkDerivation rec {
+    name = "${shell_environment}";
+    env = buildEnv { name = name; paths = buildInputs; };
+    buildInputs = [
+        # List packages that should be on the path
+        # You can search for package names using nix-env -qaP | grep <name>
+
+    ];
+
+    shellHook = ''
+      export NIX_SHELL_ENV=\${name}
+    '';
+}
+EOF
+fi
+}
+generate_autoenv_files() {
+
+    [ "${NIXIFY_CONFIGURE_AUTOENV}" = "true" ] || return 0
+
+    local shell_environment="${1:-}"
+    [ -n "$shell_environment" ] || error_exit "No nix shell environemt passed"
+
+    if [ "${NIXIFY_AUTOENV_ENTER}" != "" ] && ask_file_override "${WORKING_DIR}/${NIXIFY_AUTOENV_ENTER}"; then
+
+    cat > "${WORKING_DIR}/${NIXIFY_AUTOENV_ENTER}" <<EOF
+if [ -z "\${NIX_SHELL_EXEC}" ]; then
+    [ -n "\$SHELL" ] || SHELL="\$(command -v bash)"
+    export NIX_SHELL_EXEC=1
+
+    export NIX_SHELL_OLDPATH="\$PATH"
+
+    nix-shell --run "export SHELL=\$SHELL ; exec \$SHELL; return"
+fi
+EOF
+fi
+
+    if [ "${NIXIFY_AUTOENV_LEAVE}" != "" ] && ask_file_override "${WORKING_DIR}/${NIXIFY_AUTOENV_LEAVE}"; then
+    cat > "${WORKING_DIR}/${NIXIFY_AUTOENV_LEAVE}" <<EOF
+
+[ -n "\$NIX_SHELL_OLDPATH" ] && export PATH="\$NIX_SHELL_OLDPATH"
+
+unset NIX_SHELL_OLDPATH
+unset NIX_SHELL_ENV
+
+if [ -n "\$NIX_SHELL_EXEC" ]; then
+    unset NIX_SHELL_EXEC
+    [ -n "\$SHELL" ] || SHELL="\$(command -v bash)"
+    exec \$SHELL
+fi
+
+EOF
+fi
+}
+
+generate_gitignore() {
+    if [ -d "${WORKING_DIR}/.git" ]; then
+        echo "" >> "${WORKING_DIR}/.gitignore"
+        echo "# Nix shell generated" >> "${WORKING_DIR}/.gitignore"
+        echo "shell.nix" >> "${WORKING_DIR}/.gitignore"
+        echo ".env" >> "${WORKING_DIR}/.gitignore"
+        echo ".out" >> "${WORKING_DIR}/.gitignore"
+    fi
+}
+
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --no-editor)
+            SKIP_EDITOR="true"
+            ;;
+        --no-autoenv)
+            NIXIFY_CONFIGURE_AUTOENV="false"
+            ;;
+        -y|--yes)
+            OVERRIDE_FILES="true"
+            ;;
+        -p|--path)
+            shift
+            WORKING_DIR="$(realpath $1)"
+            [ -d "$WORKING_DIR" ] || error_exit "Path $1 is not a directory"
+            ;;
+        *)
+            if [ -z "${NIXIFY_ENV_NAME}" ]; then
+                NIXIFY_ENV_NAME="$1"
+            else
+                echo "Unknown option: $1" 1>&2
+                usage
+                exit 1
+            fi
+            ;;
+        esac
+    shift
+done
+
+[ -n "$NIXIFY_ENV_NAME" ] || {
+    usage
+    error_exit "No name given"
+}
+
+cd "$WORKING_DIR"
+
+generate_nix_shell_file "${NIXIFY_ENV_NAME}"
+generate_autoenv_files "${NIXIFY_ENV_NAME}"
+generate_gitignore
+
+([ -n "$EDITOR" ] &&  [ -e "${WORKING_DIR}/shell.nix" ] && [ "${SKIP_EDITOR}" != "true" ]) && exec "$EDITOR" +8 "${WORKING_DIR}/shell.nix"
