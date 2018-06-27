@@ -52,20 +52,26 @@ generate_nix_shell_file() {
     if ask_file_override "${WORKING_DIR}/shell.nix"; then
 
     cat > "${WORKING_DIR}/shell.nix" <<EOF
-with import <nixpkgs> {};
-stdenv.mkDerivation rec {
-    name = "${shell_environment}";
-    env = buildEnv { name = name; paths = buildInputs; };
-    buildInputs = [
-        # List packages that should be on the path
-        # You can search for package names using nix-env -qaP | grep <name>
+let
+    nixpkgs = import <nixpkgs> {
+        config.allowUnfree = false;
+        overlays = [ ];
+    };
+in
+    with nixpkgs;
+    stdenv.mkDerivation rec {
+        name = "${shell_environment}";
+        env = buildEnv { name = name; paths = buildInputs; };
+        buildInputs = [
+            # List packages that should be on the path
+            # You can search for package names using nix-env -qaP | grep <name>
 
-    ];
+        ];
 
-    shellHook = ''
-      export NIX_SHELL_ENV=\${name}
-    '';
-}
+        shellHook = ''
+          export NIX_SHELL_ENV=\${name}
+        '';
+    }
 EOF
 fi
 }
