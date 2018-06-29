@@ -15,23 +15,48 @@ NIXIFY_CONFIGURE_AUTOENV="${NIXIFY_CONFIGURE_AUTOENV:-true}"
 NIXIFY_AUTOENV_ENTER="${NIXIFY_AUTOENV_ENTER:-.env}"
 NIXIFY_AUTOENV_LEAVE="${NIXIFY_AUTOENV_LEAVE:-.out}"
 
-WORKING_DIR="${WORKING_DIR:-$(pwd)}"
+
+TARGET_DIR="${TARGET_DIR:-$(pwd)}"
 CURRENT_DIR="$(pwd)"
+WORKING_DIR="$(mktemp -d)"
+trap "rm -rf $WORKING_DIR" EXIT TERM
+
+
+NIXIFY_TEMPLATE_ROOT="$(realpath $(dirname $0)/..)/share/nixify/templates/"
+NIXIFY_TEMPLATE_DIR="${NIXIFY_TEMPLATE_DIR:-${HOME}/.nixify/templates}"
+NIXIFY_TEMPLATE="${NIXIFY_TEMPLATE:-generic}"
+
+declare -A TEMPLATES
+if [ -d "$NIXIFY_TEMPLATE_ROOT" ]; then
+  while read template; do
+    [ -d "$template" ] && TEMPLATES["$(basename $template)"]="$(realpath $template)"
+  done < <(find $NIXIFY_TEMPLATE_ROOT -mindepth 1 -maxdepth 1 -type d)
+fi
+if [ -d "$NIXIFY_TEMPLATE_DIR" ]; then
+  while read template; do
+    [ -d "$template" ] && TEMPLATES["$(basename $template)"]="$(realpath $template)"
+  done < <(find $NIXIFY_TEMPLATE_DIR -mindepth 1 -maxdepth 1 -type d)
+fi
 
 usage() {
     echo "nixify <options> [name]"
     echo "Bootstrap a nix-shell environment for development"
     echo ""
+    echo "Options:"
     echo "  -p --path            : Path of the directory to nixify (default: pwd)"
     echo "  -y --yes             : Always assume 'yes' when asking questions (WARNING: will override existing files)"
+    echo "  -t --template        : The template to use for bootstrapping (default: generic)"
     echo "  --no-editor          : Do not launch the EDITOR for shell.nix after completion"
     echo "  --no-autoenv         : Do not configure any autoenv environemt"
     echo "  -h --help            : Print this message and exit"
     echo ""
+    echo "Templates:"
+    for template in "${!TEMPLATES[@]}"; do echo "  $template"; done
+    echo ""
 }
 
 error_exit() {
-    echo "$@" 1>&2
+    echo "[ERROR] $@" 1>&2
     exit 1
 }
 
@@ -45,93 +70,66 @@ ask_file_override() {
     return 1
 }
 
-generate_nix_shell_file() {
-    local shell_environment="${1:-}"
-    [ -n "$shell_environment" ] || error_exit "No nix shell environemt passed"
+build_temp_files() {
+  local template_dir="${TEMPLATES[$NIXIFY_TEMPLATE]}"
+  local generic_dir="${TEMPLATES[generic]}"
 
-    if ask_file_override "${WORKING_DIR}/shell.nix"; then
+  while read t; do
+    cp -a "$t" "$WORKING_DIR"
+  done < <(find $generic_dir -mindepth 1 -maxdepth 1 ! -regex ".*NIXIFY_[A-Z_]+$" ! -iregex ".*README[^/]*$" ! -iregex ".*LICENSE[^/]*$")
 
-    cat > "${WORKING_DIR}/shell.nix" <<EOF
-let
-    nixpkgs = import <nixpkgs> {
-        config.allowUnfree = false;
-        overlays = [ ];
-    };
-in
-    with nixpkgs;
-    stdenv.mkDerivation rec {
-        name = "${shell_environment}";
-        env = buildEnv { name = name; paths = buildInputs; };
-        buildInputs = [
-            # List packages that should be on the path
-            # You can search for package names using nix-env -qaP | grep <name>
+  if [ "$template_dir" != "$generic_dir" ]; then
+    while read t; do
+      cp -a "$t" "$WORKING_DIR"
+    done < <(find $template_dir -mindepth 1 -maxdepth 1 ! -regex ".*NIXIFY_[A-Z_]+$" ! -iregex ".*README[^/]*$" ! -iregex ".*LICENSE[^/]*$")
+  fi
 
-        ];
-
-        shellHook = ''
-          export NIX_SHELL_ENV=\${name}
-        '';
-    }
-EOF
-fi
+  find $WORKING_DIR -name "autoenv_enter" -exec mv {} "$(dirname {})/${NIXIFY_AUTOENV_ENTER}"  \;
+  find $WORKING_DIR -name "autoenv_leave" -exec mv {} "$(dirname {})/${NIXIFY_AUTOENV_LEAVE}"  \;
 }
-generate_autoenv_files() {
 
-    [ "${NIXIFY_CONFIGURE_AUTOENV}" = "true" ] || return 0
+replace_in_working_dir() {
+  local replacement_name="$1"
+  local replacement_value="$2"
+  local file="$3"
 
-    local shell_environment="${1:-}"
-    [ -n "$shell_environment" ] || error_exit "No nix shell environemt passed"
+  awk -v r="${replacement_value}" "{gsub(/ *{{${replacement_name}}}/,r)}1" "$file" > "$file.new"
+  mv "$file.new" "$file"
+}
 
-    if [ "${NIXIFY_AUTOENV_ENTER}" != "" ] && ask_file_override "${WORKING_DIR}/${NIXIFY_AUTOENV_ENTER}"; then
+populate_templates() {
+  local template_dir="${TEMPLATES[$NIXIFY_TEMPLATE]}"
 
-    cat > "${WORKING_DIR}/${NIXIFY_AUTOENV_ENTER}" <<EOF
-if [ -z "\${NIX_SHELL_EXEC}" ]; then
-    [ -n "\$SHELL" ] || SHELL="\$(command -v bash)"
-    export NIX_SHELL_EXEC=1
+  while read file; do
+    replace_in_working_dir NIXIFY_ENV_NAME "$NIXIFY_ENV_NAME" "$file"
 
-    export NIX_SHELL_OLDPATH="\$PATH"
-
-    # Support finding the shell.nix file when changing into a deeper directory
-    CURRENT_DIR="\$(pwd)"
-    while ([ ! -e "\$CURRENT_DIR/shell.nix" ] && [ ! -e "\$CURRENT_DIR/default.nix" ]); do
-      if [ "\$CURRENT_DIR" = "/" ] || [ "\$CURRENT_DIR" = "\$(dirname \$0)" ]; then
-        echo "No shell.nix or default.nix found. Skipping nix shell invocation..." 1>&2
-        exec \$SHELL
+    for varname in $(cat "$file" | grep -o -E "\{\{[A-Z_]+}}" | grep -o -E "[A-Z_]+" ); do
+      if [ -e "$template_dir/$varname" ]; then
+        local var_value="$(cat "$template_dir/$varname")"
+        replace_in_working_dir "$varname" "$var_value" "$file"
+      else
+        replace_in_working_dir "$varname" "" "$file"
       fi
-      CURRENT_DIR="\$(realpath \$CURRENT_DIR/..)"
     done
-    [ -e "\$CURRENT_DIR/default.nix" ] || CURRENT_DIR="\$CURRENT_DIR/shell.nix"
+  done < <(find $WORKING_DIR -type f )
+}
 
-    nix-shell --run "export SHELL=\$SHELL ; exec \$SHELL; return" "\$CURRENT_DIR"
-fi
-EOF
-fi
-
-    if [ "${NIXIFY_AUTOENV_LEAVE}" != "" ] && ask_file_override "${WORKING_DIR}/${NIXIFY_AUTOENV_LEAVE}"; then
-    cat > "${WORKING_DIR}/${NIXIFY_AUTOENV_LEAVE}" <<EOF
-
-[ -n "\$NIX_SHELL_OLDPATH" ] && export PATH="\$NIX_SHELL_OLDPATH"
-
-unset NIX_SHELL_OLDPATH
-unset NIX_SHELL_ENV
-
-if [ -n "\$NIX_SHELL_EXEC" ]; then
-    unset NIX_SHELL_EXEC
-    [ -n "\$SHELL" ] || SHELL="\$(command -v bash)"
-    exec \$SHELL
-fi
-
-EOF
-fi
+populate_target_dir() {
+  for target in $(find "${WORKING_DIR}" -mindepth 1 -maxdepth 1); do
+    local relative_path="$(echo $target | sed 's#'"${WORKING_DIR}"'##g')"
+    if ask_file_override "${TARGET_DIR}/$relative_path"; then
+      cp -a "$target" "${TARGET_DIR}/"
+    fi
+  done
 }
 
 generate_gitignore() {
-    if [ -d "${WORKING_DIR}/.git" ]; then
-        echo "" >> "${WORKING_DIR}/.gitignore"
-        echo "# Nix shell generated" >> "${WORKING_DIR}/.gitignore"
-        echo "shell.nix" >> "${WORKING_DIR}/.gitignore"
-        echo ".env" >> "${WORKING_DIR}/.gitignore"
-        echo ".out" >> "${WORKING_DIR}/.gitignore"
+    if [ -d "${TARGET_DIR}/.git" ]; then
+        echo "" >> "${TARGET_DIR}/.gitignore"
+
+        grep -q "shell.nix" "${TARGET_DIR}/.gitignore" || echo "shell.nix" >> "${TARGET_DIR}/.gitignore"
+        grep -q ".env" "${TARGET_DIR}/.gitignore" || echo ".env" >> "${TARGET_DIR}/.gitignore"
+        grep -q ".out" "${TARGET_DIR}/.gitignore" || echo ".out" >> "${TARGET_DIR}/.gitignore"
     fi
 }
 
@@ -152,8 +150,16 @@ while [ "$#" -gt 0 ]; do
             ;;
         -p|--path)
             shift
-            WORKING_DIR="$(realpath $1)"
-            [ -d "$WORKING_DIR" ] || error_exit "Path $1 is not a directory"
+            TARGET_DIR="$(realpath $1)"
+            [ -d "$TARGET_DIR" ] || error_exit "Path $1 is not a directory"
+            ;;
+        -t|--template)
+            shift
+            NIXIFY_TEMPLATE="$1"
+            if [ ! "${TEMPLATES[$NIXIFY_TEMPLATE]+_}" ]; then
+              usage
+              error_exit "Unknown template: $NIXIFY_TEMPLATE"
+            fi
             ;;
         *)
             if [ -z "${NIXIFY_ENV_NAME}" ]; then
@@ -173,10 +179,14 @@ done
     error_exit "No name given"
 }
 
+NIXIFY_TEMPLATE_PATH="${TEMPLATES[$NIXIFY_TEMPLATE]}"
+[ -d "$NIXIFY_TEMPLATE_PATH" ] || error_exit "Template $NIXIFY_TEMPLATE does not exist."
+
 cd "$WORKING_DIR"
 
-generate_nix_shell_file "${NIXIFY_ENV_NAME}"
-generate_autoenv_files "${NIXIFY_ENV_NAME}"
+build_temp_files
+populate_templates
+populate_target_dir
 generate_gitignore
 
-([ -n "$EDITOR" ] &&  [ -e "${WORKING_DIR}/shell.nix" ] && [ "${SKIP_EDITOR}" != "true" ]) && exec "$EDITOR" +8 "${WORKING_DIR}/shell.nix"
+([ -n "$EDITOR" ] &&  [ -e "${TARGET_DIR}/shell.nix" ] && [ "${SKIP_EDITOR}" != "true" ]) && exec "$EDITOR" +8 "${TARGET_DIR}/shell.nix"

@@ -1,0 +1,21 @@
+if [ -z "${NIX_SHELL_EXEC}" ]; then
+    [ -n "$SHELL" ] || SHELL="$(command -v bash)"
+    export NIX_SHELL_EXEC=1
+
+    export NIX_SHELL_OLDPATH="$PATH"
+
+    # Support finding the shell.nix file when changing into a deeper directory
+    CURRENT_DIR="$(pwd)"
+    while ([ ! -e "$CURRENT_DIR/shell.nix" ] && [ ! -e "$CURRENT_DIR/default.nix" ]); do
+      if [ "$CURRENT_DIR" = "/" ] || [ "$CURRENT_DIR" = "$(dirname $0)" ]; then
+        echo "No shell.nix or default.nix found. Skipping nix shell invocation..." 1>&2
+        exec $SHELL
+      fi
+      CURRENT_DIR="$(realpath $CURRENT_DIR/..)"
+    done
+    [ -e "$CURRENT_DIR/default.nix" ] || CURRENT_DIR="$CURRENT_DIR/shell.nix"
+
+    [ -e "$0.include" ] && . "$0.include"
+
+    nix-shell --run "export SHELL=$SHELL ; exec $SHELL; return" "$CURRENT_DIR"
+fi

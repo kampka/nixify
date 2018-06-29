@@ -1,0 +1,11 @@
+
+[ -n "$NIX_SHELL_OLDPATH" ] && export PATH="$NIX_SHELL_OLDPATH"
+
+unset NIX_SHELL_OLDPATH
+unset NIX_SHELL_ENV
+
+if [ -n "$NIX_SHELL_EXEC" ]; then
+    unset NIX_SHELL_EXEC
+    [ -n "$SHELL" ] || SHELL="$(command -v bash)"
+    exec $SHELL
+fi
