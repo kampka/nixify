@@ -1,10 +1,6 @@
-dev-utils
+nixify
 =========
 
-A collection of utilities used for development.
-
-
-### nixify
 Helps bootstrapping an opinionated [nix-shell](https://nixos.org/nix/manual/#sec-nix-shell) environment by creating a minimal shell.nix file and setting up an auto-env configuration for it.
 
 Usage:
