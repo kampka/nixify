@@ -105,7 +105,9 @@ populate_templates() {
 
     for varname in $(cat "$file" | grep -o -E "\{\{[A-Z_]+}}" | grep -o -E "[A-Z_]+" ); do
       if [ -e "$template_dir/$varname" ]; then
-        local var_value="$(cat "$template_dir/$varname")"
+        # Esape amperand literals in file content to satisfy awk's escaping requirements
+        # See https://www.gnu.org/software/gawk/manual/html_node/Gory-Details.html for details
+        local var_value="$(cat "$template_dir/$varname" | awk '{gsub("&", "\\\\\\\\&")}1' )"
         replace_in_working_dir "$varname" "$var_value" "$file"
       else
         replace_in_working_dir "$varname" "" "$file"
