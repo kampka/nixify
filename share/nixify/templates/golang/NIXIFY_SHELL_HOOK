@@ -1,0 +1,10 @@
+# Set root of the gopath to where the shell.nix is located
+GOPATH="$(pwd)"
+while [ ! -e "$GOPATH/shell.nix" ] && [ "$GOPATH" != "/" ]; do
+    GOPATH="$(realpath $GOPATH/..)"
+done
+[ -e "$GOPATH/shell.nix" ] || {
+    echo "No shell.nix found in expected GOPATH. This is unexpected. GOPATH not set." 1>&2
+    exit 1
+}
+export GOPATH="$GOPATH"
