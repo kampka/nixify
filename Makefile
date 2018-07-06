@@ -8,7 +8,7 @@ all:
 
 nixify:
 	install -D -m755 bin/nixify $(DEST_DIR)$(PREFIX)/bin/nixify
-	cp -r share $(DEST_DIR)$(PREFIX)/share
-	chmod -R 755 $(DEST_DIR)$(PREFIX)/
+	cp -r share/nixify $(DEST_DIR)$(PREFIX)/share
+	chmod -R 755 $(DEST_DIR)$(PREFIX)/share/nixify
 
 install: nixify
