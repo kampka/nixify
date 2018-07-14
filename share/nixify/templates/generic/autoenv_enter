@@ -17,5 +17,5 @@ if [ -z "${NIX_SHELL_EXEC}" ]; then
 
     [ -e "$0.include" ] && . "$0.include"
 
-    nix-shell --run "export SHELL=$SHELL ; exec $SHELL; return" "$CURRENT_DIR"
+    exec nix-shell --run "export SHELL=$SHELL ; exec $SHELL; return" "$CURRENT_DIR"
 fi
