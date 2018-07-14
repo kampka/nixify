@@ -11,6 +11,8 @@ NIXIFY_ENV_NAME="${NIXIFY_ENV_NAME:-}"
 SKIP_EDITOR="${SKIP_EDITOR:-false}"
 OVERRIDE_FILES="${OVERRIDE_FILES:-false}"
 
+NIXIFY_DIFF_TOOL="${NIXIFY_DIFF_TOOL:-vimdiff}"
+
 NIXIFY_CONFIGURE_AUTOEXEC="${NIXIFY_CONFIGURE_AUTOEXEC:-true}"
 NIXIFY_CONFIGURE_AUTOENV="${NIXIFY_CONFIGURE_AUTOENV:-true}"
 NIXIFY_AUTOENV_ENTER="${NIXIFY_AUTOENV_ENTER:-.env}"
@@ -69,9 +71,13 @@ ask_file_override() {
     ([ -e "${filename}" ] && [ "${OVERRIDE_FILES}" = "false" ]) || return 0
     ([ -e "${filename}" ] && [ "$(sha1sum ${source_file} | cut -d' ' -f 1)" = "$(sha1sum ${filename} | cut -d' ' -f 1)" ] ) && return 0
 
-    read -p "File ${filename} already exists. Override? " -n 1 -r
+    read -p "File ${filename} already exists. Override? ([y]es / [d]iff / [N]o) " -n 1 -r
     echo    # (optional) move to a new line
     [[ $REPLY =~ ^[Yy]$ ]] && return 0
+    [[ $REPLY =~ ^[Dd]$ ]] && {
+        $NIXIFY_DIFF_TOOL "$source_file" "$filename" || error_exit "Failed to run diff tool '$NIXIFY_DIFF_TOOL' on $(basename $filename)"
+        return 0
+    }
     return 1
 }
 
@@ -154,6 +160,11 @@ while [ "$#" -gt 0 ]; do
             ;;
         --no-autoexec)
             NIXIFY_CONFIGURE_AUTOEXEC="false"
+            ;;
+        --diff-tool)
+            shift
+            NIXIFY_DIFF_TOOL="$(command -v $1)" || error_exit "Diff tool not found or not executable: $1"
+            [ -x "$NIXIFY_DIFF_TOOL" ] || error_exit "Diff tool not found or not executable: $1"
             ;;
         -y|--yes)
             OVERRIDE_FILES="true"
