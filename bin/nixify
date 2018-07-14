@@ -64,8 +64,11 @@ error_exit() {
 
 ask_file_override() {
     local filename="${1:-}"
+    local source_file="${2:-}"
 
     ([ -e "${filename}" ] && [ "${OVERRIDE_FILES}" = "false" ]) || return 0
+    ([ -e "${filename}" ] && [ "$(sha1sum ${source_file} | cut -d' ' -f 1)" = "$(sha1sum ${filename} | cut -d' ' -f 1)" ] ) && return 0
+
     read -p "File ${filename} already exists. Override? " -n 1 -r
     echo    # (optional) move to a new line
     [[ $REPLY =~ ^[Yy]$ ]] && return 0
@@ -121,7 +124,7 @@ populate_templates() {
 populate_target_dir() {
   for target in $(find "${WORKING_DIR}" -mindepth 1 -maxdepth 1); do
     local relative_path="$(echo $target | sed 's#'"${WORKING_DIR}"'##g')"
-    if ask_file_override "${TARGET_DIR}/$relative_path"; then
+    if ask_file_override "${TARGET_DIR}/$relative_path" "$target"; then
       cp -a "$target" "${TARGET_DIR}/"
     fi
   done
