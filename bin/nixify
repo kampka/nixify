@@ -11,6 +11,7 @@ NIXIFY_ENV_NAME="${NIXIFY_ENV_NAME:-}"
 SKIP_EDITOR="${SKIP_EDITOR:-false}"
 OVERRIDE_FILES="${OVERRIDE_FILES:-false}"
 
+NIXIFY_CONFIGURE_AUTOEXEC="${NIXIFY_CONFIGURE_AUTOEXEC:-true}"
 NIXIFY_CONFIGURE_AUTOENV="${NIXIFY_CONFIGURE_AUTOENV:-true}"
 NIXIFY_AUTOENV_ENTER="${NIXIFY_AUTOENV_ENTER:-.env}"
 NIXIFY_AUTOENV_LEAVE="${NIXIFY_AUTOENV_LEAVE:-.out}"
@@ -48,6 +49,7 @@ usage() {
     echo "  -t --template        : The template to use for bootstrapping (default: generic)"
     echo "  --no-editor          : Do not launch the EDITOR for shell.nix after completion"
     echo "  --no-autoenv         : Do not configure any autoenv environemt"
+    echo "  --no-autoexec        : Do not exec into nixified shell after completing the setup"
     echo "  -h --help            : Print this message and exit"
     echo ""
     echo "Templates:"
@@ -147,6 +149,9 @@ while [ "$#" -gt 0 ]; do
         --no-autoenv)
             NIXIFY_CONFIGURE_AUTOENV="false"
             ;;
+        --no-autoexec)
+            NIXIFY_CONFIGURE_AUTOEXEC="false"
+            ;;
         -y|--yes)
             OVERRIDE_FILES="true"
             ;;
@@ -191,4 +196,11 @@ populate_templates
 populate_target_dir
 generate_gitignore
 
-([ -n "$EDITOR" ] &&  [ -e "${TARGET_DIR}/shell.nix" ] && [ "${SKIP_EDITOR}" != "true" ]) && exec "$EDITOR" +8 "${TARGET_DIR}/shell.nix"
+([ -n "$EDITOR" ] &&  [ -e "${TARGET_DIR}/shell.nix" ] && [ "${SKIP_EDITOR}" != "true" ]) && "$EDITOR" +8 "${TARGET_DIR}/shell.nix"
+
+if [ "$NIXIFY_CONFIGURE_AUTOEXEC" != "false" ]; then
+    SHELL=${SHELL:-"$(command -v bash)"}
+    if [ -n "$SHELL" ]; then
+        exec $SHELL -c "cd ${TARGET_DIR} && exec $SHELL"
+    fi
+fi
