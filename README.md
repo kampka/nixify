@@ -1,9 +1,29 @@
-nixify
-=========
+# nixify
+
 
 Helps bootstrapping an opinionated [nix-shell](https://nixos.org/nix/manual/#sec-nix-shell) environment by creating a minimal shell.nix file and setting up an auto-env configuration for it.
 
-Usage:
+#### Installation
+
+`nixify` can be installed via the [Nix User Repository](https://github.com/nix-community/NUR)
+```console
+$ nix-env -iA nur.repos.kampka.nixify
+```
+or
+```console
+$ nix-shell -p nur.repos.kampka.nixify
+```
+or
+```nix
+{
+    # /etc/nixos/configuration.nix
+    environment.systemPackages = [
+      kampka.nixify
+    ];
+}
+```
+
+#### Usage:
 ```shell
 $ echo $PATH
 /run/wrappers/bin:/etc/profiles/per-user/user/bin:/home/user/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin
